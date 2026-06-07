@@ -183,9 +183,12 @@ type AppendEntriesArgs struct {
 }
 
 // AppendEntriesReply is the reply struct for AppendEntries
+// Updated with extra fields per section 5.3 because 4BChurn is too slow
 type AppendEntriesReply struct {
-	Term    int
-	Success bool
+	Term         int
+	Success      bool
+	ConflictTerm int
+	FirstIndex   int
 }
 
 // AppendEntries handles heartbeats from the leader
@@ -216,11 +219,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 		if args.PrevLogIndex >= len(rf.log) {
 			reply.Term = rf.currentTerm
+			reply.FirstIndex = len(rf.log)
+			reply.ConflictTerm = -1
 			return
 		}
 
 		if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
 			reply.Term = rf.currentTerm
+			reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
+
+			conflictIndex := args.PrevLogIndex
+			for conflictIndex > 0 && rf.log[conflictIndex-1].Term != reply.ConflictTerm {
+				conflictIndex = conflictIndex - 1
+			}
+
+			reply.FirstIndex = conflictIndex
 			return
 		}
 
@@ -501,8 +514,26 @@ func (rf *Raft) syncFollower(server int) {
 			}
 		}
 	} else {
-		if rf.nextIndex[server] > 1 {
-			rf.nextIndex[server] = rf.nextIndex[server] - 1
+		if rpcReply.ConflictTerm == -1 {
+			rf.nextIndex[server] = rpcReply.FirstIndex
+		} else {
+			lastIndex := -1
+			for i := len(rf.log) - 1; i > 0; i-- {
+				if rf.log[i].Term == rpcReply.ConflictTerm {
+					lastIndex = i
+					break
+				}
+			}
+
+			if lastIndex >= 0 {
+				rf.nextIndex[server] = lastIndex + 1
+			} else {
+				rf.nextIndex[server] = rpcReply.FirstIndex
+			}
+		}
+
+		if rf.nextIndex[server] < 1 {
+			rf.nextIndex[server] = 1
 		}
 	}
 }
