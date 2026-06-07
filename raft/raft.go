@@ -229,7 +229,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			reply.ConflictTerm = rf.log[args.PrevLogIndex].Term
 
 			conflictIndex := args.PrevLogIndex
-			for conflictIndex > 0 && rf.log[conflictIndex-1].Term != reply.ConflictTerm {
+			for conflictIndex > 0 && rf.log[conflictIndex-1].Term == reply.ConflictTerm {
 				conflictIndex = conflictIndex - 1
 			}
 
