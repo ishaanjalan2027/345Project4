@@ -1,15 +1,14 @@
 package raft
 
 import (
+	"bytes"
+	"cs345/labgob"
 	"cs345/labrpc"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 )
-
-// import "bytes"
-// import "labgob"
 
 // ApplyMsg is used to send committed log entries to the state machine
 // the tester uses this
@@ -80,6 +79,14 @@ func (rf *Raft) GetState() (int, bool) {
 // save Raft's persistent state to stable storage
 // not needed for project 3
 func (rf *Raft) persist() {
+	io_writer := new(bytes.Buffer)
+	encoder := labgob.NewEncoder(io_writer)
+
+	encoder.Encode(rf.currentTerm)
+	encoder.Encode(rf.votedFor)
+	encoder.Encode(rf.log)
+
+	rf.persister.SaveRaftState(io_writer.Bytes())
 }
 
 // restore previously persisted state
@@ -87,6 +94,21 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 {
 		return
 	}
+
+	io_reader := bytes.NewBuffer(data)
+	decoder := labgob.NewDecoder(io_reader)
+
+	var currentTerm int
+	var votedFor int
+	var log []LogEntry
+
+	decoder.Decode(&currentTerm)
+	decoder.Decode(&votedFor)
+	decoder.Decode(&log)
+
+	rf.currentTerm = currentTerm
+	rf.votedFor = votedFor
+	rf.log = log
 }
 
 // RequestVoteArgs holds the arguments for a RequestVote RPC
@@ -122,6 +144,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.currentTerm = args.Term
 			rf.currentRole = FOLLOWER
 			rf.votedFor = -1
+			rf.persist()
 		}
 
 		reply.Term = rf.currentTerm
@@ -138,6 +161,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// only vote if we haven't voted yet or we already voted for this person
 		if (rf.votedFor == -1 || rf.votedFor == args.CandidateID) && candidateLogOK {
 			rf.votedFor = args.CandidateID
+			rf.persist()
 			reply.VoteGranted = true
 
 			// reset timer since we granted a vote
@@ -184,6 +208,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		if args.Term > rf.currentTerm {
 			rf.currentTerm = args.Term
 			rf.votedFor = -1
+			rf.persist()
 		}
 
 		// become follower
@@ -206,10 +231,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				if rf.log[logIndex].Term != args.Entries[i].Term {
 					rf.log = rf.log[:logIndex]
 					rf.log = append(rf.log, args.Entries[i:]...)
+					rf.persist()
 					break
 				}
 			} else {
 				rf.log = append(rf.log, args.Entries[i:]...)
+				rf.persist()
 				break
 			}
 		}
@@ -274,6 +301,7 @@ func (rf *Raft) startElection() {
 	rf.currentRole = CANDIDATE
 	rf.currentTerm = rf.currentTerm + 1
 	rf.votedFor = rf.me
+	rf.persist()
 
 	// reset the timer
 	rf.lastHeartbeat = time.Now()
@@ -323,6 +351,7 @@ func (rf *Raft) startElection() {
 				rf.currentTerm = voteReply.Term
 				rf.currentRole = FOLLOWER
 				rf.votedFor = -1
+				rf.persist()
 				rf.lastHeartbeat = time.Now()
 				rf.electionTimeout = time.Duration(300+rand.Intn(300)) * time.Millisecond
 				return
@@ -439,6 +468,7 @@ func (rf *Raft) syncFollower(server int) {
 		rf.currentTerm = rpcReply.Term
 		rf.currentRole = FOLLOWER
 		rf.votedFor = -1
+		rf.persist()
 		rf.lastHeartbeat = time.Now()
 		rf.electionTimeout = time.Duration(300+rand.Intn(300)) * time.Millisecond
 		return
@@ -543,6 +573,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			Term:    rf.currentTerm,
 		}
 		rf.log = append(rf.log, newEntry)
+		rf.persist()
 		index = len(rf.log) - 1
 		rf.matchIndex[rf.me] = index
 		rf.nextIndex[rf.me] = index + 1
