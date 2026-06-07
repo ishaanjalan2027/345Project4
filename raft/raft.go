@@ -525,15 +525,11 @@ func (rf *Raft) syncFollower(server int) {
 				}
 			}
 
-			if lastIndex >= 0 {
+			if lastIndex > 0 {
 				rf.nextIndex[server] = lastIndex + 1
 			} else {
 				rf.nextIndex[server] = rpcReply.FirstIndex
 			}
-		}
-
-		if rf.nextIndex[server] < 1 {
-			rf.nextIndex[server] = 1
 		}
 	}
 }
